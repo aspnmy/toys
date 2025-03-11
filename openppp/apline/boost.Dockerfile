@@ -1,4 +1,4 @@
-FROM asppnmy/openppp2:base AS boost-builder
+FROM docker.io/aspnmy/openppp2:base AS boost-builder
 
 # 设置工作目录与base镜像一致
 WORKDIR /opt

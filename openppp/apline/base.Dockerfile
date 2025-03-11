@@ -27,4 +27,5 @@ RUN apk update && apk add --no-cache \
     net-tools \
     openssl \
     unzip \
-    zip
+    zip \
+    
