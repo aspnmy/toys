@@ -13,12 +13,12 @@ fi
 
 # 安装依赖
 function install_dependencies() {
-    echo "检测到操作系统：$OS"
+    echo "检测到操作系统:$OS"
     
     case "$OS" in
         ubuntu | debian)
             echo "更新系统和安装依赖 (Debian/Ubuntu)..."
-            apt update && apt install -y sudo screen unzip wget uuid-runtime jq
+            apt update && apt install -y sudo screen unzip wget curl uuid-runtime jq
             ;;
         *)
             echo "不支持的操作系统"
@@ -49,7 +49,7 @@ function get_version_and_download() {
         latest_version=$(curl -s https://api.github.com/repos/rebecca554owen/toys/releases/latest | jq -r '.tag_name')
         echo "当前最新版本: $latest_version"
         
-        read -p "请输入要下载的版本号（回车默认使用最新版本 $latest_version）： " version
+        read -p "请输入要下载的版本号（回车默认使用最新版本 $latest_version）: " version
         version=${version:-$latest_version}
 
         # 根据架构设定候选资产名称（io_uring优化版在前，标准版在后）
@@ -69,7 +69,7 @@ function get_version_and_download() {
             release_info=$(curl -s "https://api.github.com/repos/rebecca554owen/toys/releases/tags/$version")
         fi
 
-        [[ -z "$release_info" ]] && { echo "获取版本 $version 的发布信息失败，请检查版本号是否正确。"; exit 1; }
+        [[ -z "$release_info" ]] && { echo "获取版本 $version 的发布信息失败，请检查版本号是否正确."; exit 1; }
 
         # selected_asset 用于记录最终选择的构建文件名称
         # 通过遍历候选资产列表，找到第一个存在的有效下载链接
@@ -91,7 +91,7 @@ function get_version_and_download() {
             selected_asset="${assets[1]}"  # 强制使用标准版
         fi
 
-        [[ -z "$selected_asset" ]] && { echo "无法获取到构建文件的下载链接。"; exit 1; }
+        [[ -z "$selected_asset" ]] && { echo "无法获取到构建文件的下载链接."; exit 1; }
         echo "选择的构建文件: $selected_asset"  # 输出最终确定的构建文件名称
     fi
 
@@ -146,7 +146,7 @@ function install_ppp() {
 
     get_version_and_download
 
-    echo "请选择模式（默认为服务端）："
+    echo "请选择模式（默认为服务端）:"
     echo "1) 服务端"
     echo "2) 客户端"
     read -p "输入选择 (1 或 2，默认为服务端): " mode_choice
@@ -155,7 +155,7 @@ function install_ppp() {
     configure_service "$mode_choice"
     modify_config
     start_ppp
-    echo "PPP服务已配置并启动。"
+    echo "PPP服务已配置并启动."
     show_menu
 }
 
@@ -171,15 +171,15 @@ function uninstall_ppp() {
 
     pids=$(pgrep ppp)
     if [ -z "$pids" ]; then
-        echo "没有找到PPP进程。"
+        echo "没有找到PPP进程."
     else
         echo "找到PPP进程，正在杀死..."
         kill $pids
-        echo "已发送终止信号到PPP进程。"
+        echo "已发送终止信号到PPP进程."
     fi
 
     sudo rm -rf $ppp_dir
-    echo "PPP服务已完全卸载。"
+    echo "PPP服务已完全卸载."
 }
 
 # 启动PPP服务
@@ -187,20 +187,20 @@ function start_ppp() {
     sudo systemctl enable ppp.service
     sudo systemctl daemon-reload
     sudo systemctl start ppp.service
-    echo "PPP服务已启动。"
+    echo "PPP服务已启动."
 }
 
 # 停止PPP服务
 function stop_ppp() {
     sudo systemctl stop ppp.service
-    echo "PPP服务已停止。"
+    echo "PPP服务已停止."
 }
 
 # 重启PPP服务
 function restart_ppp() {
     sudo systemctl daemon-reload
     sudo systemctl restart ppp.service
-    echo "PPP服务已重启。"
+    echo "PPP服务已重启."
 }
 
 # 更新PPP服务
@@ -214,14 +214,14 @@ function update_ppp() {
     
     echo "启动更新后的PPP服务..."
     restart_ppp
-    echo "PPP服务已更新并重启。"
+    echo "PPP服务已更新并重启."
 }
 
 # 查看PPP会话
 function view_ppp_session() {
     echo "查看PPP会话..."
     screen -r ppp
-    echo "提示：使用 'Ctrl+a d' 来detach会话而不是关闭它。"
+    echo "提示:使用 'Ctrl+a d' 来detach会话而不是关闭它."
 }
 
 # 查看当前配置
@@ -232,7 +232,7 @@ function view_config() {
         return 1
     fi
     
-    echo -e "\n当前配置文件内容："
+    echo -e "\n当前配置文件内容:"
     jq . "${ppp_config}"
 }
 
@@ -246,7 +246,7 @@ function edit_config_item() {
     
     view_config
     
-    echo -e "\n可配置项："
+    echo -e "\n可配置项:"
     echo "1) 接口IP"
     echo "2) 公网IP"
     echo "3) 监听端口"
@@ -298,13 +298,13 @@ function modify_config() {
     
     if [ ! -f "${ppp_config}" ]; then
         echo "下载默认配置文件..."
-        if ! wget -q -O "${ppp_config}" "https://raw.githubusercontent.com/liulilittle/openppp2/main/appsettings.json"; then
+        if ! curl -sSL  "https://raw.githubusercontent.com/liulilittle/openppp2/main/appsettings.json" -o "${ppp_config}"; then
             echo "下载配置文件失败，请检查网络连接"
             return 1
         fi
     fi
     
-    echo -e "\n当前节点信息："
+    echo -e "\n当前节点信息:"
     echo "接口IP: $(jq -r '.ip.interface' ${ppp_config})"
     echo "公网IP: $(jq -r '.ip.public' ${ppp_config})"
     echo "监听端口: $(jq -r '.tcp.listen.port' ${ppp_config})"
@@ -327,7 +327,7 @@ function modify_config() {
         if [[ "$listen_port" =~ ^[0-9]+$ ]] && [ "$listen_port" -ge 1 ] && [ "$listen_port" -le 65535 ]; then
             break
         else
-            echo "输入的端口无效。请确保它是在1到65535的范围内。"
+            echo "输入的端口无效.请确保它是在1到65535的范围内."
         fi
     done
 
@@ -400,16 +400,16 @@ function modify_config() {
         mv "${tmp_file}" "${ppp_config}"
     done
 
-    echo "配置文件更新完成。"
+    echo "配置文件更新完成."
 
-    echo -e "\n修改后的配置参数："
+    echo -e "\n修改后的配置参数:"
     echo "接口IP: $(jq -r '.ip.interface' ${ppp_config})"
     echo "公网IP: $(jq -r '.ip.public' ${ppp_config})"
     echo "监听端口: $(jq -r '.tcp.listen.port' ${ppp_config})"
     echo "并发数: $(jq -r '.concurrent' ${ppp_config})"
     echo "客户端GUID: $(jq -r '.client.guid' ${ppp_config})"
-    echo -e "\n${ppp_config} 服务端配置文件修改成功。"
-    echo -e "\n${ppp_config} 同时可以当作客户端配置文件。"
+    echo -e "\n${ppp_config} 服务端配置文件修改成功."
+    echo -e "\n${ppp_config} 同时可以当作客户端配置文件."
     restart_ppp
 }
 
