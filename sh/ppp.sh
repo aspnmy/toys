@@ -4,7 +4,9 @@ ppp_dir="/etc/ppp" # 定义安装目录
 
 # 检测操作系统
 OS=""
-if [ -f /etc/redhat-release ]; then
+if [ -f /etc/alpine-release ]; then
+    OS="Alpine"
+elif [ -f /etc/redhat-release ]; then
     OS="CentOS"
 elif [ -f /etc/os-release ]; then
     . /etc/os-release
@@ -19,6 +21,16 @@ function install_dependencies() {
         ubuntu | debian)
             echo "更新系统和安装依赖 (Debian/Ubuntu)..."
             apt update && apt install -y sudo screen unzip wget curl uuid-runtime jq
+            ;;
+        CentOS)
+            echo "更新系统和安装依赖 (CentOS)..."
+            yum update -y
+            yum install -y sudo screen unzip wget curl util-linux jq
+            ;;
+        Alpine)
+            echo "更新系统和安装依赖 (Alpine)..."
+            apk update
+            apk add --no-cache sudo screen unzip wget curl util-linux jq bash
             ;;
         *)
             echo "不支持的操作系统"
@@ -49,10 +61,10 @@ function get_version_and_download() {
         latest_version=$(curl -s https://api.github.com/repos/rebecca554owen/toys/releases/latest | jq -r '.tag_name')
         echo "当前最新版本: $latest_version"
         
-        read -p "请输入要下载的版本号（回车默认使用最新版本 $latest_version）: " version
+        read -p "请输入要下载的版本号(回车默认使用最新版本 $latest_version): " version
         version=${version:-$latest_version}
 
-        # 根据架构设定候选资产名称（io_uring优化版在前，标准版在后）
+        # 根据架构设定候选资产名称(io_uring优化版在前,标准版在后)
         if [[ "$arch" == "x86_64" ]]; then
             assets=("openppp2-linux-amd64-io-uring.zip" "openppp2-linux-amd64.zip")
         elif [[ "$arch" == "aarch64" ]]; then
@@ -69,25 +81,25 @@ function get_version_and_download() {
             release_info=$(curl -s "https://api.github.com/repos/rebecca554owen/toys/releases/tags/$version")
         fi
 
-        [[ -z "$release_info" ]] && { echo "获取版本 $version 的发布信息失败，请检查版本号是否正确."; exit 1; }
+        [[ -z "$release_info" ]] && { echo "获取版本 $version 的发布信息失败,请检查版本号是否正确."; exit 1; }
 
         # selected_asset 用于记录最终选择的构建文件名称
-        # 通过遍历候选资产列表，找到第一个存在的有效下载链接
+        # 通过遍历候选资产列表,找到第一个存在的有效下载链接
         selected_asset=""
         for asset in "${assets[@]}"; do
             download_url=$(echo "$release_info" | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .browser_download_url')
             [[ -n "$download_url" && "$download_url" != "null" ]] && { selected_asset=$asset; break; }
         done
 
-        # 内核版本检查与版本选择（selected_asset 可能在此处被修改）
+        # 内核版本检查与版本选择(selected_asset 可能在此处被修改)
         if [[ "$selected_asset" == "${assets[0]}" && "$can_use_io" == true ]]; then
-            echo "检测到当前内核版本支持 io_uring 特性（要求 5.10+）"
+            echo "检测到当前内核版本支持 io_uring 特性(要求 5.10+)"
             read -p "是否要使用 io_uring 优化版本？[Y/n] " use_io
             use_io=$(echo "$use_io" | tr '[:upper:]' '[:lower:]')
-            # 如果用户选择不使用io_uring版本，则降级到标准版
+            # 如果用户选择不使用io_uring版本,则降级到标准版
             [[ "$use_io" == "n" || "$use_io" == "no" ]] && selected_asset="${assets[1]}"
         elif [[ "$can_use_io" == false ]]; then
-            echo "当前内核版本不满足 io_uring 要求（需要 5.10+），自动选择标准版本"
+            echo "当前内核版本不满足 io_uring 要求(需要 5.10+),自动选择标准版本"
             selected_asset="${assets[1]}"  # 强制使用标准版
         fi
 
@@ -110,15 +122,16 @@ function configure_service() {
     local restart_policy
 
     if [[ "$mode_choice" == "2" ]]; then
-        exec_start="/usr/bin/screen -DmS ppp $ppp_dir/ppp --mode=client --tun-host=no --tun-ssmt=4/mq --tun-flash=yes --tun-mux=0"
+    #/usr/bin/screen -DmS ppp /etc/ppp/ppp --mode=client --tun-host=no --tun-ssmt=4/mq --tun-flash=yes --tun-mux=0
+        exec_start='/usr/bin/screen -DmS ppp '"$ppp_dir"'/ppp --mode=client --tun-host=yes --tun-ssmt=4/mq --tun-flash=yes --tun-mux=0'
         restart_policy="no"
     else
-        exec_start="/usr/bin/screen -DmS ppp $ppp_dir/ppp --mode=server"
+        exec_start='/usr/bin/screen -DmS ppp '"$ppp_dir"'/ppp --mode=server'
         restart_policy="always"
     fi
 
     echo "配置系统服务..."
-    cat > /etc/systemd/system/ppp.service << EOF
+    cat > /etc/systemd/system/ppp.service <<'EOF'
 [Unit]
 Description=PPP Service with Screen
 After=network.target
@@ -126,14 +139,19 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=$ppp_dir
-ExecStart=$exec_start
-Restart=$restart_policy
+WorkingDirectory=${ppp_dir}
+ExecStart=${exec_start}
+Restart=${restart_policy}
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+    # 替换变量
+    sed -i "s|\${ppp_dir}|$ppp_dir|g" /etc/systemd/system/ppp.service
+    sed -i "s|\${exec_start}|$exec_start|g" /etc/systemd/system/ppp.service
+    sed -i "s|\${restart_policy}|$restart_policy|g" /etc/systemd/system/ppp.service
 }
 
 # 安装PPP服务
@@ -146,10 +164,10 @@ function install_ppp() {
 
     get_version_and_download
 
-    echo "请选择模式（默认为服务端）:"
+    echo "请选择模式(默认为服务端):"
     echo "1) 服务端"
     echo "2) 客户端"
-    read -p "输入选择 (1 或 2，默认为服务端): " mode_choice
+    read -p "输入选择 (1 或 2,默认为服务端): " mode_choice
     mode_choice=${mode_choice:-1}
 
     configure_service "$mode_choice"
@@ -173,7 +191,7 @@ function uninstall_ppp() {
     if [ -z "$pids" ]; then
         echo "没有找到PPP进程."
     else
-        echo "找到PPP进程，正在杀死..."
+        echo "找到PPP进程,正在杀死..."
         kill $pids
         echo "已发送终止信号到PPP进程."
     fi
@@ -202,6 +220,22 @@ function restart_ppp() {
     sudo systemctl restart ppp.service
     echo "PPP服务已重启."
 }
+
+# 重新配置ppp系统服务文件
+function reconfigure_ppp() {
+    echo "重新配置PPP服务..."
+    stop_ppp
+    echo "请选择模式(默认为服务端):"
+    echo "1) 服务端"
+    echo "2) 客户端"
+    read -p "输入选择 (1 或 2,默认为服务端): " mode_choice
+    mode_choice=${mode_choice:-1}
+
+    configure_service "$mode_choice"
+    start_ppp
+    echo "PPP系统服务已重新配置并启动."
+}
+
 
 # 更新PPP服务
 function update_ppp() {
@@ -252,6 +286,7 @@ function edit_config_item() {
     echo "3) 监听端口"
     echo "4) 并发数"
     echo "5) 客户端GUID"
+    
     read -p "请选择要修改的配置项 (1-5): " choice
     
     case $choice in
@@ -299,7 +334,7 @@ function modify_config() {
     if [ ! -f "${ppp_config}" ]; then
         echo "下载默认配置文件..."
         if ! curl -sSL  "https://raw.githubusercontent.com/liulilittle/openppp2/main/appsettings.json" -o "${ppp_config}"; then
-            echo "下载配置文件失败，请检查网络连接"
+            echo "下载配置文件失败,请检查网络连接"
             return 1
         fi
     fi
@@ -317,11 +352,11 @@ function modify_config() {
     echo -e "检测到的公网IP: ${public_ip}\n本地IP地址: ${local_ips}"
 
     default_public_ip="::"
-    read -p "请输入VPS IP地址（服务端默认为${default_public_ip}，客户端则写vps的IP地址）: " public_ip
+    read -p "请输入服务器端 IP地址(服务端默认为${default_public_ip},客户端则写服务器端的IP地址): " public_ip
     public_ip=${public_ip:-$default_public_ip}
 
     while true; do
-        read -p "请输入VPS 端口 [默认: 2025]: " listen_port
+        read -p "请输入服务器端 端口 [默认: 2025]: " listen_port
         listen_port=${listen_port:-2025}
     
         if [[ "$listen_port" =~ ^[0-9]+$ ]] && [ "$listen_port" -ge 1 ] && [ "$listen_port" -le 65535 ]; then
@@ -332,7 +367,7 @@ function modify_config() {
     done
 
     default_interface_ip="::"
-    read -p "请输入内网IP地址（服务端默认为${default_interface_ip}，客户端可写内网IP地址）: " interface_ip
+    read -p "请输入内网IP地址(服务端默认为${default_interface_ip},客户端可写内网IP地址): " interface_ip
     interface_ip=${interface_ip:-$default_interface_ip}
 
     concurrent=$(nproc)
@@ -353,7 +388,7 @@ function modify_config() {
         [".udp.static.\"keep-alived\""]="[1,10]"
         [".udp.static.aggligator"]=0
         [".udp.static.servers"]="[\"${public_ip}:${listen_port}\"]"
-        [".websocket.host"]="ppp2.qisuyun.xyz"
+        [".websocket.host"]="ppp2"
         [".websocket.path"]="/tun"
         [".websocket.listen.ws"]=2095
         [".websocket.listen.wss"]=2096
@@ -416,9 +451,8 @@ function modify_config() {
 # 显示主菜单
 function show_menu() {
     PS3='请选择一个操作: '
-    options=("安装PPP" "启动PPP" "停止PPP" "重启PPP" "更新PPP" "卸载PPP" "查看PPP会话" "查看配置" "编辑配置项" "修改配置文件" "退出")
-    select opt in "${options[@]}"
-    do
+    options=("安装PPP" "启动PPP" "停止PPP" "重启PPP" "更新PPP" "卸载PPP" "查看PPP会话" "查看配置" "编辑配置项" "修改配置文件" "重新配置ppp系统服务" "退出")
+    select opt in "${options[@]}"; do
         case $opt in
             "安装PPP")
                 install_ppp
@@ -449,6 +483,9 @@ function show_menu() {
                 ;;
             "修改配置文件")
                 modify_config
+                ;;
+            "重新配置ppp系统服务")
+                reconfigure_ppp
                 ;;
             "退出")
                 break
