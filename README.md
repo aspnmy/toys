@@ -13,7 +13,7 @@ bash <(curl -Ls https://raw.githubusercontents.com/rebecca554owen/toys/main/sh/g
 ```
 ## ppp.sh 适用于openppp2安装
 ```
-bash <(curl -Ls https://raw.githubusercontents.com/rebecca554owen/toys/main/sh/ppp.sh)
+bash <(curl -Ls https://raw.githubusercontents.com/aspnmy/toys/main/sh/ppp.sh)
 ```
 ## compose.yaml 适用于openppp2
 ```
