@@ -123,7 +123,7 @@ function configure_service() {
 
     if [[ "$mode_choice" == "2" ]]; then
     #/usr/bin/screen -DmS ppp /etc/ppp/ppp --mode=client --tun-host=no --tun-ssmt=4/mq --tun-flash=yes --tun-mux=0
-        exec_start='/usr/bin/screen -DmS ppp '"$ppp_dir"'/ppp --mode=client --tun-host=yes --tun-ssmt=4/mq --tun-flash=yes --tun-mux=0'
+        exec_start='/usr/bin/screen -DmS ppp '"$ppp_dir"'/ppp --mode=client --tun-host=yes --tun-ssmt=4/mq --tun-flash=yes --tun-mux=0 --tun-static=yes '
         restart_policy="no"
     else
         exec_start='/usr/bin/screen -DmS ppp '"$ppp_dir"'/ppp --mode=server'
