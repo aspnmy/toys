@@ -14,7 +14,7 @@ const foreignNameservers = [
 const dnsConfig = {
   enable: true,
   listen: "0.0.0.0:1053",
-  "prefer-h3": true,
+  "prefer-h3": false,
   ipv6: true,
   "use-system-hosts": false, // true or false
   "cache-algorithm": "arc",
@@ -143,7 +143,8 @@ const ruleProviders = {
 // 规则配置
 const rules = [
   // 自定义规则
-  "DOMAIN,lan.qisuyun.xyz,DIRECT",
+  "DOMAIN,lan.freewife.online,DIRECT",
+  "DOMAIN-SUFFIX,freewife.online,节点选择",
   "DOMAIN-SUFFIX,googleapis.cn,节点选择", // Google服务
   "DOMAIN-SUFFIX,gstatic.com,节点选择", // Google静态资源
   "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,节点选择", // Google Play

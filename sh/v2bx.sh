@@ -19,7 +19,7 @@ DEFAULT_NODE_TYPE="vless"
 DEFAULT_CERT_MODE="none"
 DEFAULT_CERT_DOMAIN="node.example.com"
 DEFAULT_CF_API_EMAIL=""
-DEFAULT_CF_API_KEY=""
+DEFAULT_CF_API_KEY="" # global key  
 
 # 加载配置
 load_config() {
@@ -111,6 +111,11 @@ display_config() {
 # 检查必须的配置变量
 check_required_env() {
     missing_vars=""
+    # 如果未安装jq 则直接apt安装, 否则直接跳过
+    if ! command -v jq &>/dev/null; then
+        echo -e "${YELLOW}正在安装jq...${NC}"
+        apt install -y jq
+    fi
     # NodeID 为必要参数
     if [ -z "$NodeID" ]; then
         missing_vars="$missing_vars NodeID"
@@ -368,13 +373,24 @@ quick_setup() {
 
 # 启动服务
 generate_full_config() {
+    # 如果未安装v2bx 则提示安装
+    if ! command -v v2bx &>/dev/null; then
+        echo -e "${YELLOW}检测到未安装v2bx,使用以下命令安装,选择不生成配置文件...${NC}"
+        echo -e "${YELLOW}bash <(curl -Ls https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh) ${NC}"
+    fi 
     if check_required_env && validate_core_node_types; then
         generate_core_config
         generate_node_config
         echo -e "${GREEN}配置文件已生成，输入 v2bx 命令启动${NC}"
-    else
-        echo -e "${RED}配置验证失败，请检查错误信息${NC}"
-        exit 1
+    fi
+    # 如果 route.json 文件存在，匹配rules数组中是否存在outboundTag为"socks5-warp"且domain为空数组则修改tag
+    if [ -f "/etc/V2bX/route.json" ]; then
+        # 使用jq精确匹配规则结构后再替换
+        if jq -e '.rules[] | select(.outboundTag == "socks5-warp" and .domain == [""])' /etc/V2bX/route.json > /dev/null; then
+            jq '(.. | .outboundTag? | select(. == "socks5-warp")) |= "IPv4_out"' \
+                /etc/V2bX/route.json > /tmp/route.json.tmp && \
+            mv /tmp/route.json.tmp /etc/V2bX/route.json
+        fi
     fi
 }
 
@@ -387,6 +403,7 @@ main() {
         echo -e "${YELLOW} bash v2bx.sh ApiHost=https://api.example.com ApiKey=your_api_key NodeID=1 NodeType=vless ...${NC}"
         echo -e "${YELLOW} 遇到无法生成配置文件，执行 rm $v2bx_config 后重试${NC}"
     fi
+    v2bx restart
 }
 
 # 执行主函数
