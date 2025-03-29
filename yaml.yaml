@@ -20,7 +20,14 @@ proxies:
     username: admin
     password: password
 
-  - name: HK-claw
+  - name: HK-wo
+    type: socks5
+    server: 127.0.0.1
+    port: 1083
+    username: admin
+    password: password
+
+  - name: HK-hks-v1
     type: socks5
     server: 127.0.0.1
     port: 1084
