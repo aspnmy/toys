@@ -1,0 +1,3 @@
+:9988 {
+    respond "Hello from Caddy (Manual Download)!"
+}
