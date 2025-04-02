@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -euo pipefail
 ppp_dir="/etc/ppp" # 定义安装目录
 
 # 检测操作系统
@@ -40,80 +40,101 @@ function install_dependencies() {
 }
 
 # 获取版本、下载和解压文件
+
 function get_version_and_download() {
     # 获取系统信息
-    kernel_version=$(uname -r)
-    arch=$(uname -m)
+    local kernel_version=$(uname -r)
+    local arch=$(uname -m)
+    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
     echo "系统架构: $arch, 内核版本: $kernel_version"
 
-    # 判断内核版本是否满足使用 io-uring 的条件
-    compare_kernel_version=$(echo -e "5.10\n$kernel_version" | sort -V | head -n1)
-    can_use_io=$([[ "$compare_kernel_version" == "5.10" && "$kernel_version" != "5.10" ]] && echo true || echo false)
+    # 检查必要工具
+    command -v curl >/dev/null || { echo "请先安装curl"; exit 1; }
+    command -v jq >/dev/null || { echo "请先安装jq"; exit 1; }
 
-    read -p "是否使用默认下载地址？[Y/n]: " use_default
-    use_default=$(echo "$use_default" | tr '[:upper:]' '[:lower:]')
-
-    if [[ "$use_default" == "n" || "$use_default" == "no" ]]; then
-        echo "请输入自定义的下载地址:"
-        read download_url
-    else
-        # 先获取版本信息再处理架构支持
-        latest_version=$(curl -s https://api.github.com/repos/rebecca554owen/toys/releases/latest | jq -r '.tag_name')
-        echo "当前最新版本: $latest_version"
-        
-        read -p "请输入要下载的版本号(回车默认使用最新版本 $latest_version): " version
-        version=${version:-$latest_version}
-
-        # 根据架构设定候选资产名称(io_uring优化版在前,标准版在后)
-        if [[ "$arch" == "x86_64" ]]; then
-            assets=("openppp2-linux-amd64-io-uring.zip" "openppp2-linux-amd64.zip")
-        elif [[ "$arch" == "aarch64" ]]; then
-            assets=("openppp2-linux-aarch64-io-uring.zip" "openppp2-linux-aarch64.zip")
-        else
-            echo "不支持的架构: $arch"
-            exit 1
-        fi
-
-        # 获取对应版本的发布信息
-        if [[ "$version" == "$latest_version" ]]; then
-            release_info=$(curl -s https://api.github.com/repos/rebecca554owen/toys/releases/latest)
-        else
-            release_info=$(curl -s "https://api.github.com/repos/rebecca554owen/toys/releases/tags/$version")
-        fi
-
-        [[ -z "$release_info" ]] && { echo "获取版本 $version 的发布信息失败,请检查版本号是否正确."; exit 1; }
-
-        # selected_asset 用于记录最终选择的构建文件名称
-        # 通过遍历候选资产列表,找到第一个存在的有效下载链接
-        selected_asset=""
-        for asset in "${assets[@]}"; do
-            download_url=$(echo "$release_info" | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .browser_download_url')
-            [[ -n "$download_url" && "$download_url" != "null" ]] && { selected_asset=$asset; break; }
-        done
-
-        # 内核版本检查与版本选择(selected_asset 可能在此处被修改)
-        if [[ "$selected_asset" == "${assets[0]}" && "$can_use_io" == true ]]; then
-            echo "检测到当前内核版本支持 io_uring 特性(要求 5.10+)"
-            read -p "是否要使用 io_uring 优化版本？[Y/n] " use_io
-            use_io=$(echo "$use_io" | tr '[:upper:]' '[:lower:]')
-            # 如果用户选择不使用io_uring版本,则降级到标准版
-            [[ "$use_io" == "n" || "$use_io" == "no" ]] && selected_asset="${assets[1]}"
-        elif [[ "$can_use_io" == false ]]; then
-            echo "当前内核版本不满足 io_uring 要求(需要 5.10+),自动选择标准版本"
-            selected_asset="${assets[1]}"  # 强制使用标准版
-        fi
-
-        [[ -z "$selected_asset" ]] && { echo "无法获取到构建文件的下载链接."; exit 1; }
-        echo "选择的构建文件: $selected_asset"  # 输出最终确定的构建文件名称
+    # 判断内核是否支持io_uring
+    local can_use_io=false
+    if [[ $(echo -e "5.10\n$kernel_version" | sort -V | head -n1) == "5.10" ]] && [[ "$kernel_version" != "5.10" ]]; then
+        can_use_io=true
     fi
 
-    # 统一处理下载和解压
+    # 处理下载地址
+    read -p "是否使用默认下载地址？[Y/n]: " use_default
+    use_default=${use_default:-Y}
+    case "${use_default,,}" in
+        n|no)
+            read -p "请输入自定义下载地址: " download_url
+            [[ -z "$download_url" ]] && { echo "下载地址不能为空"; exit 1; }
+            ;;
+        *)
+            # 获取版本信息
+            local latest_version=$(curl -sf https://api.github.com/repos/liulilittle/openppp2/releases/latest | jq -r '.tag_name')
+            echo "当前最新版本: $latest_version"
+            
+            read -p "请输入要下载的版本号(回车使用 $latest_version): " version
+            version=${version:-$latest_version}
+
+            # 根据系统架构生成候选列表
+            local assets=()
+            case "$os-$arch" in
+                linux-x86_64)     assets=("openppp2-linux-amd64-io-uring.zip" "openppp2-linux-amd64.zip") ;;
+                linux-aarch64)    assets=("openppp2-linux-aarch64-io-uring.zip" "openppp2-linux-aarch64.zip") ;;
+                linux-armv7*)     assets=("openppp2-linux-armv7l.zip") ;;
+                linux-ppc64*)     assets=("openppp2-linux-ppc64le-io-uring.zip" "openppp2-linux-ppc64le.zip") ;;
+                linux-mips*)      assets=("openppp2-linux-mipsel.zip") ;;
+                linux-riscv64)    assets=("openppp2-linux-riscv64.zip") ;;
+                linux-s390x)      assets=("openppp2-linux-s390x.zip") ;;
+                darwin-x86_64)    assets=("openppp2-macos-amd64.zip") ;;
+                darwin-arm64)     assets=("openppp2-macos-arm64.zip") ;;
+                *windows*i386)    assets=("openppp2-windows-i386.zip") ;;
+                *windows*x86_64)  assets=("openppp2-windows-amd64.zip") ;;
+                *)                echo "不支持的架构: $os-$arch"; exit 1 ;;
+            esac
+
+            # 获取发布信息
+            local release_info=$(curl -sf "https://api.github.com/repos/liulilittle/openppp2/releases/$([[ "$version" == "$latest_version" ]] && echo "latest" || echo "tags/$version")")
+            [[ -z "$release_info" ]] && { echo "获取版本信息失败"; exit 1; }
+
+            # 查找可用资源
+            local selected_asset download_url
+            for asset in "${assets[@]}"; do
+                download_url=$(echo "$release_info" | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .browser_download_url')
+                [[ -n "$download_url" && "$download_url" != "null" ]] && { selected_asset=$asset; break; }
+            done
+            [[ -z "$download_url" ]] && { echo "找不到对应版本的构建文件"; exit 1; }
+
+            # io_uring版本选择逻辑
+            if [[ "$selected_asset" == *io-uring* ]]; then
+                if $can_use_io; then
+                    read -p "检测到支持io_uring，是否使用优化版？[Y/n]: " use_io
+                    if [[ "${use_io:-Y}" =~ [Nn] ]]; then
+                        # 寻找标准版本
+                        for asset in "${assets[@]}"; do
+                            [[ "$asset" != *io-uring* ]] && \
+                            download_url=$(echo "$release_info" | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .browser_download_url') && break
+                        done
+                    fi
+                else
+                    echo "系统不支持io_uring，自动选择标准版本"
+                    for asset in "${assets[@]}"; do
+                        [[ "$asset" != *io-uring* ]] && \
+                        download_url=$(echo "$release_info" | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .browser_download_url') && break
+                    done
+                fi
+            fi
+            echo "下载文件: ${download_url##*/}"
+            ;;
+    esac
+
+    # 执行下载和解压
     echo "下载文件中..."
-    wget "$download_url"
-    echo "解压下载的文件..."
-    unzip -o '*.zip' -x 'appsettings.json' && rm *.zip
+    curl -LfO "$download_url" || { echo "下载失败"; exit 1; }
+    echo "解压文件..."
+    unzip -o -q '*.zip' -x 'appsettings.json' && rm -f ./*.zip
     chmod +x ppp
+    echo "安装完成"
 }
+
 
 # 配置系统服务
 function configure_service() {
