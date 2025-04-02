@@ -22,17 +22,7 @@ install_dependencies() {
         ubuntu | debian)
             echo "更新系统和安装依赖 (Debian/Ubuntu)..."
             apt-get update
-            # 添加必要的系统工具包
-            apt-get install -y sudo screen unzip wget curl uuid-runtime jq supervisor procps iproute2 iputils-ping net-tools
-            
-            # 确保 supervisor 服务停止
-            if [ -f "/var/run/supervisor.sock" ]; then
-                rm -f /var/run/supervisor.sock
-            fi
-            if [ -f "/var/run/supervisord.pid" ]; then
-                kill -9 $(cat /var/run/supervisord.pid) 2>/dev/null
-                rm -f /var/run/supervisord.pid
-            fi
+            apt-get install -y sudo screen unzip wget curl uuid-runtime jq supervisor
             
             # 初始化 supervisor 配置
             mkdir -p /etc/supervisor/conf.d
@@ -49,7 +39,6 @@ chmod=0700
 logfile=/var/log/supervisor/supervisord.log
 pidfile=/var/run/supervisord.pid
 childlogdir=/var/log/supervisor
-nodaemon=false
 
 [rpcinterface:supervisor]
 supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
@@ -60,6 +49,12 @@ serverurl=unix:///var/run/supervisor.sock
 [include]
 files = /etc/supervisor/conf.d/*.conf
 EOF
+            fi
+            
+            # 确保 supervisor 服务正在运行
+            if ! pgrep supervisord >/dev/null; then
+                echo "启动 supervisord..."
+                supervisord -c /etc/supervisor/supervisord.conf
             fi
             ;;
         CentOS)
@@ -198,12 +193,8 @@ get_version_and_download() {
         echo "请输入自定义的下载地址:"
         read download_url
     else
-        # 获取版本信息并进行净化处理
-        latest_version=$(curl -s "https://api.github.com/repos/liulilittle/openppp2/releases/latest" | tr -d '\000-\031' | jq -r '.tag_name // empty')
-        if [ -z "$latest_version" ]; then
-            echo "无法获取最新版本信息"
-            return 1
-        fi
+        # 先获取版本信息再处理架构支持
+        latest_version=$(curl -s https://api.github.com/repos/liulilittle/openppp2/releases/latest | jq -r '.tag_name')
         echo "当前最新版本: $latest_version"
         
         read -p "请输入要下载的版本号(回车默认使用最新版本 $latest_version): " version
@@ -218,41 +209,29 @@ get_version_and_download() {
             asset2="openppp2-linux-aarch64.zip"
         elif [ "$arch" = "armv7l" ]; then
             asset1="openppp2-linux-armv7l.zip"
-        else
+         
+                    else
             echo "不支持的架构: $arch"
             exit 1
         fi
 
-        # 获取并净化发布信息
+        # 获取对应版本的发布信息
         if [ "$version" = "$latest_version" ]; then
-            release_info=$(curl -s "https://api.github.com/repos/liulilittle/openppp2/releases/latest" )
+            release_info=$(curl -s https://api.github.com/repos/liulilittle/openppp2/releases/latest)
         else
-            release_info=$(curl -s "https://api.github.com/repos/liulilittle/openppp2/releases/tags/$version" )
-        fi
-        echo "$release_info"
-        if ! echo "$release_info" | jq empty 2>/dev/null; then
-            echo "获取的发布信息格式无效"
-            return 1
+            release_info=$(curl -s "https://api.github.com/repos/liulilittle/openppp2/releases/tags/$version")
         fi
 
-        [ -z "$release_info" ] && { echo "获取版本 $version 的发布信息失败,请检查版本号是否正确."; return 1; }
+        [ -z "$release_info" ] && { echo "获取版本 $version 的发布信息失败,请检查版本号是否正确."; exit 1; }
 
-        # 查找可用的下载链接并验证 JSON 响应
+        # 查找可用的下载链接
         selected_asset=""
-        download_url=$(echo "$release_info" | jq -r --arg name "$asset1" '.assets[] | select(.name == $name) | .browser_download_url // empty')
+        download_url=$(echo "$release_info" | jq -r --arg name "$asset1" '.assets[] | select(.name == $name) | .browser_download_url')
         if [ -n "$download_url" ] && [ "$download_url" != "null" ]; then
             selected_asset="$asset1"
         else
-            download_url=$(echo "$release_info" | jq -r --arg name "$asset2" '.assets[] | select(.name == $name) | .browser_download_url // empty')
-            if [ -n "$download_url" ] && [ "$download_url" != "null" ]; then
-                selected_asset="$asset2"
-            fi
-        fi
-
-        # 验证下载 URL
-        if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
-            echo "无法获取有效的下载链接"
-            return 1
+            download_url=$(echo "$release_info" | jq -r --arg name "$asset2" '.assets[] | select(.name == $name) | .browser_download_url')
+            [ -n "$download_url" ] && [ "$download_url" != "null" ] && selected_asset="$asset2"
         fi
 
         # 内核版本检查与版本选择
@@ -332,42 +311,14 @@ startsecs=0
 stopwaitsecs=0
 EOF
 
-    # 检查并启动 supervisor
-    if ! command -v supervisord >/dev/null 2>&1; then
-        echo "supervisord 未安装，重新安装依赖..."
-        install_dependencies
-    fi
-
-    # 确保旧的 supervisor sock 和 pid 文件被清理
-    if [ -f "/var/run/supervisor.sock" ]; then
-        rm -f /var/run/supervisor.sock
-    fi
-    if [ -f "/var/run/supervisord.pid" ]; then
-        kill -9 $(cat /var/run/supervisord.pid) 2>/dev/null
-        rm -f /var/run/supervisord.pid
-    fi
-    
-    # 检查是否有其他 supervisord 进程
-    if pgrep supervisord >/dev/null 2>&1; then
-        echo "发现正在运行的 supervisord 进程，尝试停止..."
-        pkill supervisord
-        sleep 2
-    fi
-
-    # 启动 supervisord
-    echo "启动 supervisord..."
-    supervisord -c /etc/supervisor/supervisord.conf
-
-    # 等待 supervisor 启动
-    sleep 2
-    if ! supervisorctl status >/dev/null 2>&1; then
-        echo "supervisord 启动失败"
-        return 1
-    fi
-
     # 重新加载supervisor配置
-    supervisorctl reread
-    supervisorctl update
+    if ! pgrep supervisord >/dev/null; then
+        echo "启动 supervisord..."
+        supervisord -c /etc/supervisor/supervisord.conf
+    else
+        supervisorctl reread
+        supervisorctl update
+    fi
 }
 
 # 安装PPP服务
@@ -536,7 +487,7 @@ modify_config() {
     ppp_config="${ppp_dir}/appsettings.json"
     
     # 备份原配置文件
-    if [ -f "${ppp_config}" ];then
+    if [ -f "${ppp_config}" ]; then
         backup_file="${ppp_config}.$(date +%Y%m%d%H%M%S).bak"
         cp "${ppp_config}" "${backup_file}"
         echo "已备份原配置文件到 ${backup_file}"
@@ -558,21 +509,8 @@ modify_config() {
     echo "客户端GUID: $(jq -r '.client.guid' ${ppp_config})"
 
     echo "检测网络信息..."
-    # 添加错误处理的网络检测
-    if command -v curl >/dev/null 2>&1; then
-        public_ip=$(curl -m 10 -s ip.sb || curl -m 10 -s ifconfig.me || echo "::")
-    else
-        public_ip="::"
-    fi
-    
-    if command -v ip >/dev/null 2>&1; then
-        local_ips=$(ip -4 addr show | grep 'inet ' | grep -v ' lo' | awk '{print $2}' | cut -d/ -f1 | tr '\n' ' ')
-    elif command -v ifconfig >/dev/null 2>&1; then
-        local_ips=$(ifconfig | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | tr '\n' ' ')
-    else
-        local_ips="无法获取本地IP"
-    fi
-    
+    public_ip=$(curl -m 10 -s ip.sb || echo "::")
+    local_ips=$(ip addr | grep 'inet ' | grep -v ' lo' | awk '{print $2}' | cut -d/ -f1 | tr '\n' ' ')
     echo -e "检测到的公网IP: ${public_ip}\n本地IP地址: ${local_ips}"
 
     default_public_ip="::"

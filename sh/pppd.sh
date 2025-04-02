@@ -68,7 +68,16 @@ function get_version_and_download() {
             ;;
         *)
             # 获取版本信息
-            local latest_version=$(curl -sf https://api.github.com/repos/liulilittle/openppp2/releases/latest | jq -r '.tag_name')
+            local api_url="https://api.github.com/repos/liulilittle/openppp2/releases/latest"
+            local release_info=$(curl -sf "$api_url")
+            if [ $? -ne 0 ]; then
+                echo "获取版本信息失败，尝试使用代理..."
+                release_info=$(curl -sf -x socks5h://127.0.0.1:1080 "$api_url" || \
+                             curl -sf -x http://127.0.0.1:1080 "$api_url")
+                [ $? -ne 0 ] && { echo "无法获取版本信息"; exit 1; }
+            fi
+            
+            local latest_version=$(echo "$release_info" | jq -r '.tag_name')
             echo "当前最新版本: $latest_version"
             
             read -p "请输入要下载的版本号(回车使用 $latest_version): " version
@@ -91,17 +100,33 @@ function get_version_and_download() {
                 *)                echo "不支持的架构: $os-$arch"; exit 1 ;;
             esac
 
-            # 获取发布信息
-            local release_info=$(curl -sf "https://api.github.com/repos/liulilittle/openppp2/releases/$([[ "$version" == "$latest_version" ]] && echo "latest" || echo "tags/$version")")
-            [[ -z "$release_info" ]] && { echo "获取版本信息失败"; exit 1; }
+            # 获取指定版本的发布信息
+            local api_version_url="https://api.github.com/repos/liulilittle/openppp2/releases/tags/$version"
+            [ "$version" == "$latest_version" ] && api_version_url="$api_url"
+            
+            local release_info=$(curl -sf "$api_version_url")
+            if [ $? -ne 0 ]; then
+                echo "获取版本详情失败，尝试使用代理..."
+                release_info=$(curl -sf -x socks5h://127.0.0.1:1080 "$api_version_url" || \
+                             curl -sf -x http://127.0.0.1:1080 "$api_version_url")
+                [ $? -ne 0 ] && { echo "无法获取版本详情"; exit 1; }
+            fi
 
             # 查找可用资源
-            local selected_asset download_url
+            local selected_asset=""
+            local download_url=""
             for asset in "${assets[@]}"; do
                 download_url=$(echo "$release_info" | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .browser_download_url')
-                [[ -n "$download_url" && "$download_url" != "null" ]] && { selected_asset=$asset; break; }
+                if [[ -n "$download_url" && "$download_url" != "null" ]]; then
+                    selected_asset=$asset
+                    break
+                fi
             done
-            [[ -z "$download_url" ]] && { echo "找不到对应版本的构建文件"; exit 1; }
+
+            if [ -z "$download_url" ]; then
+                echo "找不到对应版本的构建文件"
+                exit 1
+            fi
 
             # io_uring版本选择逻辑
             if [[ "$selected_asset" == *io-uring* ]]; then
@@ -122,7 +147,7 @@ function get_version_and_download() {
                     done
                 fi
             fi
-            echo "下载文件: ${download_url##*/}"
+            echo "选择下载: ${download_url##*/}"
             ;;
     esac
 
